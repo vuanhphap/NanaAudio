@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>NanaAudio Acoustic v1.3 Adaptive Sync Debug</title>
+<title>NanaAudio Acoustic v1.4 Dual-Sync Debug</title>
 <style>
 :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color-scheme:dark;background:#101114;color:#f4f5f7}
 *{box-sizing:border-box} body{margin:0;background:#101114;color:#f4f5f7} .wrap{max-width:980px;margin:auto;padding:18px}
@@ -15,7 +15,7 @@ h2{font-size:17px;margin:0 0 12px}.row{display:flex;gap:10px;align-items:center;
 </head>
 <body>
 <div class="wrap">
-  <h1>NanaAudio Acoustic v1.3 Adaptive Sync Debug</h1>
+  <h1>NanaAudio Acoustic v1.4 Dual-Sync Debug</h1>
   <p class="sub">Truyền file trực tiếp bằng <b>loa ↔ microphone</b>, không cần mạng. Bản này ưu tiên kiểm chứng đường truyền thực tế: packet + SHA-256 + CRC32 + OFDM, chạy trong một file HTML.</p>
 
   <div class="grid">
@@ -28,7 +28,7 @@ h2{font-size:17px;margin:0 0 12px}.row{display:flex;gap:10px;align-items:center;
         <option value="turbo64">TURBO+ — 64-QAM, ~66 kbps raw (experimental)</option>
       </select></div>
       <div id="profileInfo" class="stat"></div>
-      <p class="small">Khuyến nghị hiện tại: FAST. v1.3 tăng cyclic prefix lên 6.7 ms để chịu echo tốt hơn. TURBO/TURBO+ vẫn là experimental trên loa/mic thật.</p>
+      <p class="small">Khuyến nghị hiện tại: FAST. v1.4 dùng dual-sync UP→DOWN + cyclic prefix 6.7 ms để chống khóa nhầm payload và chịu echo tốt hơn. TURBO/TURBO+ vẫn là experimental trên loa/mic thật.</p>
     </section>
 
     <section class="card">
@@ -82,7 +82,7 @@ h2{font-size:17px;margin:0 0 12px}.row{display:flex;gap:10px;align-items:center;
 
     <section class="card full">
       <h2>Thông số giao thức v1</h2>
-      <div class="stat">48 kHz protocol clock · FFT 1024 · cyclic prefix 128 · 3 training symbols · pilots mỗi 12 carrier · equalization theo từng subcarrier · SHA-256 file · CRC32 toàn packet · UTF-8 filename/MIME · STREAM TX cho file lớn · PCM16 capture để giảm RAM phía nhận.
+      <div class="stat">48 kHz protocol clock · FFT 1024 · cyclic prefix 320 · dual-sync UP→DOWN · 3 training symbols · pilots mỗi 12 carrier · equalization theo từng subcarrier · SHA-256 file · CRC32 toàn packet · UTF-8 filename/MIME · STREAM TX cho file lớn · PCM16 capture để giảm RAM phía nhận.
 
 Không truyền KEY hay dữ liệu bí mật nào ngoài chính nội dung file. Đây là modem truyền dữ liệu, không phải lớp mã hóa bảo mật.</div>
     </section>
@@ -93,7 +93,7 @@ Không truyền KEY hay dữ liệu bí mật nào ngoài chính nội dung file
 'use strict';
 
 const SR = 48000, N = 1024, CP = 320, SYM = N + CP;
-const SYNC_TONE_SEC = 0.24, SYNC_GAP_SEC = 0.08, TAIL_SEC = 0.12, TRAIN_COUNT = 3;
+const SYNC_CHIRP_SEC = 0.12, SYNC_MID_GAP_SEC = 0.035, SYNC_TONE_SEC = SYNC_CHIRP_SEC*2 + SYNC_MID_GAP_SEC, SYNC_GAP_SEC = 0.08, TAIL_SEC = 0.12, TRAIN_COUNT = 3;
 const MAX_FILE = 10 * 1024 * 1024, MAX_AUDIO_SECONDS = 1800, MAX_WAVE_MB = 32;
 const PROFILES = {
   robust:{name:'ROBUST', first:50, count:96, mod:'bpsk', bpc:1, fec:'rep3'},
@@ -122,7 +122,7 @@ function updateMicMeters(force=false){if(debugFrozen&&!force)return;if(!$('rmsMe
 function debugReport(){
   const p=profile(), st=rxTrackSettings||{}, clipPct=liveMic.totalSamples?100*liveMic.clipSamples/liveMic.totalSamples:0;
   const lines=[
-    `NanaAudio Acoustic v1.3 Adaptive Sync Debug`,
+    `NanaAudio Acoustic v1.4 Dual-Sync Debug`,
     `Time: ${new Date().toLocaleString('vi-VN')}`,
     `Profile: ${p.name} / ${p.mod.toUpperCase()} / FEC ${p.fec} / CP=${CP} (${(CP/SR*1000).toFixed(1)}ms)`,
     `Page: ${location.protocol}  secureContext=${window.isSecureContext}`,
@@ -138,9 +138,9 @@ function debugReport(){
   else lines.push(`TX: chưa chuẩn bị`);
   if(lastRxCapture)lines.push(`Last capture: ${fmtTime(lastRxCapture.duration)} / RMS ${dbText(lastRxCapture.rms)} / PEAK ${dbText(lastRxCapture.peak)} / clip ${lastRxCapture.clipPct.toFixed(3)}%`);
   if(lastDecode){
-    lines.push(`SYNC: start=${lastDecode.toneStart} samples / score=${lastDecode.syncScore.toFixed(3)} / global=${lastDecode.syncGlobal?'yes':'no'} / SNR≈${Number.isFinite(lastDecode.snrDb)?lastDecode.snrDb.toFixed(1)+' dB':'n/a'}`);
-    lines.push(`TIMING: Δ=${lastDecode.timingDelta>=0?'+':''}${lastDecode.timingDelta} samp / CP score=${Number.isFinite(lastDecode.cpScore)?lastDecode.cpScore.toFixed(3):'n/a'} / FFT offset=${lastDecode.fftOffset}`);
-    lines.push(`OFDM: symbols=${lastDecode.nSym} / pilot EVM=${Number.isFinite(lastDecode.evmPct)?lastDecode.evmPct.toFixed(1)+'%':'n/a'} / train |H|=${lastDecode.channelMag.toFixed(2)} / SRO≈${Number.isFinite(lastDecode.sroPpm)?lastDecode.sroPpm.toFixed(0)+' ppm':'n/a'}`);
+    lines.push(`SYNC: start=${lastDecode.toneStart} / UP=${lastDecode.syncScore.toFixed(3)} / DOWN=${Number.isFinite(lastDecode.syncDownScore)?lastDecode.syncDownScore.toFixed(3):'n/a'} / guard=${Number.isFinite(lastDecode.syncCombined)?lastDecode.syncCombined.toFixed(3):'n/a'} / SNR≈${Number.isFinite(lastDecode.snrDb)?lastDecode.snrDb.toFixed(1)+' dB':'n/a'}`);
+    lines.push(`TIMING: Δ=${lastDecode.timingDelta>=0?'+':''}${lastDecode.timingDelta} samp / CP=${Number.isFinite(lastDecode.cpScore)?lastDecode.cpScore.toFixed(3):'n/a'} / TRAIN=${Number.isFinite(lastDecode.trainScore)?lastDecode.trainScore.toFixed(3):'n/a'} / FFT offset=${lastDecode.fftOffset}`);
+    lines.push(`OFDM: symbols=${lastDecode.nSym} / pilot EVM=${Number.isFinite(lastDecode.evmPct)?lastDecode.evmPct.toFixed(1)+'%':'n/a'} / train |H|=${lastDecode.channelMag.toFixed(3)} / SRO≈${Number.isFinite(lastDecode.sroPpm)?lastDecode.sroPpm.toFixed(0)+' ppm':'n/a'}`);
     if(lastDecode.headHex)lines.push(`HEAD: ${lastDecode.headHex}`);
   }else lines.push(`SYNC/OFDM: chưa có lần decode`);
   lines.push(`Last error: ${lastError||'—'}`);
@@ -247,7 +247,8 @@ function makeOfdmSymbol(p,bits=null,bitOff=0,symIndex=0,training=false){
 }
 function concatFloat(parts){let n=0;for(const p of parts)n+=p.length;const o=new Float32Array(n);let x=0;for(const p of parts){o.set(p,x);x+=p.length;}return o;}
 function concatInt16(parts){let n=0;for(const p of parts)n+=p.length;const o=new Int16Array(n);let x=0;for(const p of parts){o.set(p,x);x+=p.length;}return o;}
-function syncTone(){const n=Math.round(SYNC_TONE_SEC*SR),o=new Float32Array(n),f0=700,f1=7000,T=n/SR,k=(f1-f0)/T;for(let i=0;i<n;i++){const t=i/SR,ramp=Math.min(1,i/240,(n-1-i)/240),phase=2*Math.PI*(f0*t+0.5*k*t*t);o[i]=0.45*ramp*Math.sin(phase);}return o;}
+function syncChirp(up=true){const n=Math.round(SYNC_CHIRP_SEC*SR),o=new Float32Array(n),fa=up?850:7200,fb=up?7200:850,T=n/SR,k=(fb-fa)/T;for(let i=0;i<n;i++){const t=i/SR,ramp=Math.min(1,i/180,(n-1-i)/180),phase=2*Math.PI*(fa*t+0.5*k*t*t);o[i]=0.48*ramp*Math.sin(phase);}return o;}
+function syncTone(){return concatFloat([syncChirp(true),new Float32Array(Math.round(SYNC_MID_GAP_SEC*SR)),syncChirp(false)]);}
 function buildTransmission(packet,p){
   let bits=bytesToBits(packet); if(p.fec==='rep3')bits=rep3Encode(bits); const cap=capacityBits(p), nSym=Math.ceil(bits.length/cap), padded=new Uint8Array(nSym*cap);padded.set(bits);
   const parts=[syncTone(),new Float32Array(Math.round(SYNC_GAP_SEC*SR))]; for(let t=0;t<TRAIN_COUNT;t++)parts.push(makeOfdmSymbol(p,null,0,t,true).samples);
@@ -311,33 +312,61 @@ function corrSparse(x,ref,x0,r0,L,stride){
   if(n<8||ex<1e-12||er<1e-12)return 0;
   return Math.abs(c)/Math.sqrt(ex*er);
 }
-function findToneStart(x){
-  // v1.3: search globally, then validate candidates against the repeated OFDM
-  // training/CP. This avoids locking onto a random quiet-room transient or a
-  // data segment that happens to correlate with part of the chirp.
-  const ref=syncTone(),r0=Math.round(.060*SR),L=Math.min(Math.round(.090*SR),ref.length-r0);
-  if(x.length<L+64)throw new Error('Bản ghi quá ngắn để tìm sync');
-  let max=0;for(let i=0;i<x.length;i+=32){const a=Math.abs(x[i]);if(a>max)max=a;}if(max<1e-4)throw new Error('Không có tín hiệu âm thanh');
-  const coarseStep=96,coarseStride=16,sep=2048,top=[];
-  const keep=(seg,score)=>{for(let i=0;i<top.length;i++){if(Math.abs(top[i].seg-seg)<sep){if(score>top[i].score)top[i]={seg,score};return;}}top.push({seg,score});top.sort((a,b)=>b.score-a.score);if(top.length>12)top.length=12;};
-  for(let seg=r0;seg+L<x.length;seg+=coarseStep){const sc=corrSparse(x,ref,seg,r0,L,coarseStride);if(sc>0.035)keep(seg,sc);}
-  if(!top.length)throw new Error('Không tìm thấy sync chirp');
-  let best=null;
-  for(const cand of top){
-    let fineSeg=cand.seg,fineScore=cand.score,lo=Math.max(r0,cand.seg-coarseStep-8),hi=Math.min(x.length-L-1,cand.seg+coarseStep+8);
-    for(let seg=lo;seg<=hi;seg+=4){const sc=corrSparse(x,ref,seg,r0,L,4);if(sc>fineScore){fineScore=sc;fineSeg=seg;}}
-    lo=Math.max(r0,fineSeg-8);hi=Math.min(x.length-L-1,fineSeg+8);
-    for(let seg=lo;seg<=hi;seg++){const sc=corrSparse(x,ref,seg,r0,L,2);if(sc>fineScore){fineScore=sc;fineSeg=seg;}}
-    const toneStart=Math.max(0,fineSeg-r0),nominal=toneStart+Math.round((SYNC_TONE_SEC+SYNC_GAP_SEC)*SR);
-    if(nominal+TRAIN_COUNT*SYM+SYM>=x.length)continue;
-    const tim=fineOfdmTiming(x,nominal),cp=Math.max(0,tim.score||0),combined=fineScore*(0.20+0.80*cp);
-    if(!best||combined>best.combined)best={start:toneStart,score:fineScore,coarse:cand.seg-r0,max,global:true,timing:tim,combined};
+function localSyncSnrDb(x,toneStart){
+  let ss=0,n=0;const sigEnd=Math.min(x.length,toneStart+Math.round(SYNC_TONE_SEC*SR));
+  for(let i=Math.max(0,toneStart);i<sigEnd;i+=2){const v=x[i];ss+=v*v;n++;}const sig=n?Math.sqrt(ss/n):0;
+  ss=0;n=0;const b=Math.max(0,toneStart-Math.round(.008*SR)),a=Math.max(0,b-Math.round(.16*SR));for(let i=a;i<b;i+=2){const v=x[i];ss+=v*v;n++;}const noi=n?Math.sqrt(ss/n):NaN;
+  return Number.isFinite(noi)&&noi>1e-12&&sig>0?20*Math.log10(sig/noi):NaN;
+}
+function trainingConsistencyAt(x,trainStart,p,fftOffset=Math.round(CP*0.75)){
+  if(trainStart<0||trainStart+TRAIN_COUNT*SYM+fftOffset+N>x.length)return 0;
+  const bins=activeBins(p),hs=[];
+  for(let t=0;t<TRAIN_COUNT;t++){const F=fftSymbol(x,trainStart+t*SYM,fftOffset),r=new Float64Array(bins.length),i=new Float64Array(bins.length);for(let ci=0;ci<bins.length;ci++){const k=bins[ci],v=trainVal(ci);r[ci]=F.re[k]/v;i[ci]=F.im[k]/v;}hs.push({r,i});}
+  const ref=hs[0];let scoreSum=0,nScore=0;
+  for(let t=1;t<TRAIN_COUNT;t++){
+    const pts=[];for(let ci=0;ci<bins.length;ci++){const q=cdiv(hs[t].r[ci],hs[t].i[ci],ref.r[ci],ref.i[ci]);pts.push({x:ci,r:q[0],i:q[1]});}
+    const fit=phaseLine(pts);let err=0,eng=0;
+    for(let ci=0;ci<bins.length;ci++){const ph=fit.a+fit.b*ci,c=Math.cos(ph),sn=Math.sin(ph),rr=(hs[t].r[ci]*c+hs[t].i[ci]*sn)/fit.g,ii=(hs[t].i[ci]*c-hs[t].r[ci]*sn)/fit.g,dr=rr-ref.r[ci],di=ii-ref.i[ci];err+=dr*dr+di*di;eng+=ref.r[ci]*ref.r[ci]+ref.i[ci]*ref.i[ci];}
+    scoreSum+=1/(1+err/(eng+1e-12));nScore++;
   }
-  if(!best)throw new Error('Có sync candidate nhưng không đủ OFDM data phía sau');
-  if(best.score<0.10)throw new Error(`Sync chirp quá yếu/không chắc chắn (score ${best.score.toFixed(3)})`);
+  return nScore?scoreSum/nScore:0;
+}
+function findToneStart(x,p){
+  // v1.4 dual sync: an UP chirp must be followed by a DOWN chirp at the exact
+  // protocol spacing. This makes ordinary OFDM payload/CP a very poor false
+  // sync candidate. CP and training consistency are secondary guards.
+  const up=syncChirp(true),down=syncChirp(false),r0=Math.round(.015*SR),L=Math.min(Math.round(.042*SR),up.length-r0);
+  if(x.length<L+64)throw new Error('Bản ghi quá ngắn để tìm dual-sync');
+  let mx=0;for(let i=0;i<x.length;i+=32)mx=Math.max(mx,Math.abs(x[i]));if(mx<1e-4)throw new Error('Không có tín hiệu âm thanh');
+  const coarseStep=80,coarseStride=8,sep=Math.round(.075*SR),top=[];
+  const keep=(seg,score)=>{for(let i=0;i<top.length;i++){if(Math.abs(top[i].seg-seg)<sep){if(score>top[i].score)top[i]={seg,score};return;}}top.push({seg,score});top.sort((a,b)=>b.score-a.score);if(top.length>30)top.length=30;};
+  for(let seg=r0;seg+L<x.length;seg+=coarseStep){const sc=corrSparse(x,up,seg,r0,L,coarseStride);if(sc>0.030)keep(seg,sc);}
+  if(!top.length)throw new Error('Không tìm thấy UP sync chirp');
+  const downDelta=Math.round((SYNC_CHIRP_SEC+SYNC_MID_GAP_SEC)*SR);let best=null;
+  for(const cand of top){
+    let useg=cand.seg,us=cand.score,lo=Math.max(r0,cand.seg-coarseStep),hi=Math.min(x.length-L-1,cand.seg+coarseStep);
+    for(let seg=lo;seg<=hi;seg+=3){const sc=corrSparse(x,up,seg,r0,L,3);if(sc>us){us=sc;useg=seg;}}
+    const toneStart=Math.max(0,useg-r0),expectedDown=toneStart+downDelta,center=expectedDown+r0;let ds=0,dseg=center;
+    lo=Math.max(r0,center-180);hi=Math.min(x.length-L-1,center+180);
+    for(let seg=lo;seg<=hi;seg+=3){const sc=corrSparse(x,down,seg,r0,L,3);if(sc>ds){ds=sc;dseg=seg;}}
+    for(let seg=Math.max(r0,dseg-5);seg<=Math.min(x.length-L-1,dseg+5);seg++){const sc=corrSparse(x,down,seg,r0,L,2);if(sc>ds){ds=sc;dseg=seg;}}
+    if(ds<0.040)continue;
+    const snr=localSyncSnrDb(x,toneStart),nominal=toneStart+Math.round((SYNC_TONE_SEC+SYNC_GAP_SEC)*SR);if(nominal+TRAIN_COUNT*SYM+SYM>=x.length)continue;
+    const tim=fineOfdmTiming(x,nominal),cp=Math.max(0,tim.score||0),train=trainingConsistencyAt(x,nominal+tim.delta,p),dual=Math.sqrt(Math.max(0,us*ds)),snrGate=Number.isFinite(snr)?Math.max(0,Math.min(1,(snr+2)/18)):0;
+    const combined=dual*(0.35+0.65*cp)*(0.35+0.65*train)*(0.20+0.80*snrGate),item={start:toneStart,score:us,downScore:ds,combined,snrDb:snr,trainScore:train,timing:tim,candidates:top.length,global:true,max:mx,coarse:cand.seg-r0};
+    if(!best||combined>best.combined)best=item;
+  }
+  if(!best)throw new Error('Không có cặp UP→DOWN sync hợp lệ');
+  if(best.score<0.050||best.downScore<0.050)throw new Error(`Dual-sync quá yếu (UP ${best.score.toFixed(3)}, DOWN ${best.downScore.toFixed(3)})`);
+  if(Number.isFinite(best.snrDb)&&best.snrDb<2.5)throw new Error(`Dual-sync bị loại: local SNR ${best.snrDb.toFixed(1)} dB quá thấp`);
+  if((best.timing?.score||0)<0.07)throw new Error(`Dual-sync bị loại: CP ${(best.timing?.score||0).toFixed(3)} quá thấp`);
   return best;
 }
-function resampleLinear(input,inSR,outSR=SR){if(Math.abs(inSR-outSR)<1)return input;const n=Math.floor(input.length*outSR/inSR),o=new Float32Array(n),r=inSR/outSR;for(let i=0;i<n;i++){const x=i*r,j=Math.floor(x),f=x-j;o[i]=(input[j]||0)*(1-f)+(input[j+1]||0)*f;}return o;}
+function resampleLinear(input,inSR,outSR=SR){
+  const int16=input instanceof Int16Array,scale=int16?1/32768:1;
+  if(Math.abs(inSR-outSR)<1){if(!int16)return input;const o=new Float32Array(input.length);for(let i=0;i<input.length;i++)o[i]=input[i]*scale;return o;}
+  const n=Math.floor(input.length*outSR/inSR),o=new Float32Array(n),r=inSR/outSR;for(let i=0;i<n;i++){const z=i*r,j=Math.floor(z),f=z-j;o[i]=((input[j]||0)*(1-f)+(input[j+1]||0)*f)*scale;}return o;
+}
 function cdiv(ar,ai,br,bi){const d=br*br+bi*bi+1e-12;return[(ar*br+ai*bi)/d,(ai*br-ar*bi)/d];}
 function cpCorrAt(x,n){
   if(n<0||n+SYM>=x.length)return 0;let c=0,e1=0,e2=0;
@@ -358,7 +387,7 @@ function phaseLine(points){
 }
 function fftSymbol(x,symbolStart,fftOffset){const re=new Float64Array(N),im=new Float64Array(N),st=symbolStart+fftOffset;for(let i=0;i<N;i++)re[i]=x[st+i]||0;fft(re,im,false);return {re,im};}
 function decodeTransmission(input,p){
-  const x=input,sync=findToneStart(x),toneStart=sync.start;
+  const x=input,sync=findToneStart(x,p),toneStart=sync.start;
   const nominalTrain=toneStart+Math.round((SYNC_TONE_SEC+SYNC_GAP_SEC)*SR),tim=sync.timing||fineOfdmTiming(x,nominalTrain),trainStart=nominalTrain+tim.delta;
   const fftOffset=Math.round(CP*0.75);
   if(trainStart+TRAIN_COUNT*SYM+fftOffset+N>x.length)throw new Error('Bản ghi quá ngắn');
@@ -391,7 +420,7 @@ function decodeTransmission(input,p){
   {let ss=0,n=0;const a=toneStart,b=Math.min(x.length,toneStart+Math.round(SYNC_TONE_SEC*SR));for(let i=a;i<b;i++){ss+=x[i]*x[i];n++;}if(n)signalRms=Math.sqrt(ss/n);}
   if(Number.isFinite(noiseRms)&&noiseRms>1e-9&&Number.isFinite(signalRms))snrDb=20*Math.log10(signalRms/noiseRms);
   let bits=Uint8Array.from(out);if(p.fec==='rep3')bits=rep3Decode(bits);const bytes=bitsToBytes(bits),headHex=Array.from(bytes.slice(0,8)).map(v=>v.toString(16).padStart(2,'0')).join(' ');
-  return {bytes,toneStart,nSym,bits:bits.length,syncScore:sync.score,syncCoarse:sync.coarse,syncGlobal:sync.global,snrDb,channelMag,evmPct:evmN?100*Math.sqrt(evmErr/evmN):NaN,timingDelta:tim.delta,cpScore:tim.score,fftOffset,sroPpm,headHex};
+  return {bytes,toneStart,nSym,bits:bits.length,syncScore:sync.score,syncDownScore:sync.downScore,syncCombined:sync.combined,syncCandidates:sync.candidates,syncCoarse:sync.coarse,syncGlobal:sync.global,snrDb:Number.isFinite(sync.snrDb)?sync.snrDb:snrDb,channelMag,trainScore:sync.trainScore,evmPct:evmN?100*Math.sqrt(evmErr/evmN):NaN,timingDelta:tim.delta,cpScore:tim.score,fftOffset,sroPpm,headHex};
 }
 
 // ---------- WAV ----------
@@ -453,7 +482,7 @@ $('stopRecord').onclick=async()=>{
     if(rxStream)for(const t of rxStream.getTracks())t.stop();if(rxNode)rxNode.disconnect();if(rxCtx)await rxCtx.close();
     const raw=concatInt16(rxChunks);rxChunks=[];lastRxCapture=captureStats(raw,actualSr);dlog('RX CAPTURE',`${lastRxCapture.duration.toFixed(2)}s rms=${dbText(lastRxCapture.rms)} peak=${dbText(lastRxCapture.peak)} clip=${lastRxCapture.clipPct.toFixed(3)}%`);
     if(raw.length<actualSr/2)throw new Error('Bản ghi quá ngắn');setBar($('rxBar'),15);log($('rxStat'),`Đã thu ${fmtTime(raw.length/actualSr)}. Đang đồng bộ…`);await new Promise(r=>setTimeout(r,0));
-    const samples=resampleLinear(raw,actualSr,SR);const d=decodeTransmission(samples,profile());lastDecode=d;dlog('SYNC',`start=${d.toneStart} score=${d.syncScore.toFixed(3)} global=${d.syncGlobal} snr=${Number.isFinite(d.snrDb)?d.snrDb.toFixed(1):'n/a'}dB`);dlog('TIMING',`delta=${d.timingDelta} cp=${Number.isFinite(d.cpScore)?d.cpScore.toFixed(3):'n/a'} fftOff=${d.fftOffset}`);dlog('OFDM',`symbols=${d.nSym} evm=${Number.isFinite(d.evmPct)?d.evmPct.toFixed(1):'n/a'}% H=${d.channelMag.toFixed(2)} sro=${Number.isFinite(d.sroPpm)?d.sroPpm.toFixed(0):'n/a'}ppm head=${d.headHex}`);setBar($('rxBar'),70);await new Promise(r=>setTimeout(r,0));
+    const samples=resampleLinear(raw,actualSr,SR);const d=decodeTransmission(samples,profile());lastDecode=d;dlog('SYNC',`start=${d.toneStart} up=${d.syncScore.toFixed(3)} down=${Number.isFinite(d.syncDownScore)?d.syncDownScore.toFixed(3):'n/a'} guard=${Number.isFinite(d.syncCombined)?d.syncCombined.toFixed(3):'n/a'} snr=${Number.isFinite(d.snrDb)?d.snrDb.toFixed(1):'n/a'}dB`);dlog('TIMING',`delta=${d.timingDelta} cp=${Number.isFinite(d.cpScore)?d.cpScore.toFixed(3):'n/a'} train=${Number.isFinite(d.trainScore)?d.trainScore.toFixed(3):'n/a'} fftOff=${d.fftOffset}`);dlog('OFDM',`symbols=${d.nSym} evm=${Number.isFinite(d.evmPct)?d.evmPct.toFixed(1):'n/a'}% H=${d.channelMag.toFixed(2)} sro=${Number.isFinite(d.sroPpm)?d.sroPpm.toFixed(0):'n/a'}ppm head=${d.headHex}`);setBar($('rxBar'),70);await new Promise(r=>setTimeout(r,0));
     const obj=await unpackBytes(d.bytes);setBar($('rxBar'),100);rxBlob=new Blob([obj.data],{type:obj.mime||'application/octet-stream'});rxName=obj.name||'received.bin';$('downloadRx').disabled=false;lastError='';dlog('RX OK',`${rxName} ${obj.data.length}B CRC=OK SHA=OK`);
     log($('rxStat'),`THÀNH CÔNG\nFile: ${rxName}\nDung lượng: ${fmtBytes(obj.data.length)}\nCRC32: OK\nSHA-256: OK\nSync score: ${d.syncScore.toFixed(3)}\nSNR ước tính: ${Number.isFinite(d.snrDb)?d.snrDb.toFixed(1)+' dB':'n/a'}\nPilot EVM: ${Number.isFinite(d.evmPct)?d.evmPct.toFixed(1)+'%':'n/a'}\nOFDM symbols đọc: ${d.nSym}`);
   }catch(e){setBar($('rxBar'),0);setLastError('RX decode',e);log($('rxStat'),'GIẢI MÃ THẤT BẠI: '+e.message+'\n\nHãy chụp ô Debug bên dưới. Thử: giảm profile xuống FAST/ROBUST, giảm âm lượng nếu clipping, đưa loa-mic gần hơn.');}
@@ -478,6 +507,8 @@ async function runSelfTest(){
     const p=PROFILES[key],tiny=randBytes(256,0x55AA7711),pk=await packBytes('realish.dat','application/octet-stream',tiny),tx=buildTransmission(pk,p),dd=decodeTransmission(simulatedRealishChannel(tx.samples,160),p),uu=await unpackBytes(dd.bytes);assert(uu.data.length===tiny.length&&uu.data.every((v,i)=>v===tiny[i]),`${p.name}: global sync + multipath + 160ppm SRO`);
   }
   {const p=PROFILES.turbo64,tiny=randBytes(512,0x13579BDF),pk=await packBytes('stream.dat','application/octet-stream',tiny),tx=buildStreamSimulation(pk,p,5),dd=decodeTransmission(simulatedChannel(tx.samples),p),uu=await unpackBytes(dd.bytes);assert(uu.data.length===tiny.length&&uu.data.every((v,i)=>v===tiny[i]),'TURBO+: STREAM chunk round-trip');}
+  {const p=PROFILES.fast,tiny=randBytes(180,0x31415926),pk=await packBytes('pcm16.dat','application/octet-stream',tiny),tx=buildTransmission(pk,p),ch=simulatedChannel(tx.samples),pcm=new Int16Array(ch.length);for(let i=0;i<ch.length;i++)pcm[i]=Math.max(-32768,Math.min(32767,Math.round(ch[i]*32767)));const normalized=resampleLinear(pcm,SR,SR),dd=decodeTransmission(normalized,p),uu=await unpackBytes(dd.bytes);assert(uu.data.length===tiny.length&&uu.data.every((v,i)=>v===tiny[i])&&dd.channelMag<10,'FAST: PCM16 normalized before DSP');}
+  {const p=PROFILES.fast,junk=randBytes(900,0x77773333),pk=await packBytes('junk.bin','application/octet-stream',junk),tx=buildTransmission(pk,p),cut=Math.min(tx.samples.length-1,Math.round(.50*SR)),payloadOnly=tx.samples.slice(cut);let rejected=false;try{decodeTransmission(payloadOnly,p);}catch{rejected=true;}assert(rejected,'FAST: dual-sync rejects payload-only false lock');}
   return lines;
 }
 $('selfTest').onclick=async()=>{const b=$('testBadge');b.textContent='đang chạy';b.className='pill warn';dlog('SELFTEST','start');log($('testLog'),'Đang chạy…');try{const lines=await runSelfTest();log($('testLog'),lines.join('\n')+'\n\nALL TESTS PASSED');b.textContent='PASS';b.className='pill ok';lastError='';dlog('SELFTEST','PASS');}catch(e){setLastError('SELFTEST',e);log($('testLog'),'FAIL: '+e.message+'\n'+(e.stack||''));b.textContent='FAIL';b.className='pill bad';}};
@@ -489,7 +520,7 @@ $('copyDebug').onclick=async()=>{const report=debugReport()+'\n\n--- EVENT LOG -
 updateMicMeters(true);updateDebugSummary(true);
 
 // headless / CI hook
-window.NanaAudioTest={runSelfTest,crc32,packBytes,unpackBytes,buildTransmission,buildTransmissionAsync,buildStreamSimulation,transmissionPlan,decodeTransmission,PROFILES,randBytes,simulatedChannel,simulatedRealishChannel,debugReport,captureStats};
+window.NanaAudioTest={runSelfTest,crc32,packBytes,unpackBytes,buildTransmission,buildTransmissionAsync,buildStreamSimulation,transmissionPlan,decodeTransmission,PROFILES,randBytes,simulatedChannel,simulatedRealishChannel,debugReport,captureStats,findToneStart,resampleLinear};
 if(location.hash==='#selftest') setTimeout(()=>{$('selfTest').click();},100);
 })();
 </script>
