@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>NanaAudio Acoustic v1.1 Debug</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color-scheme:dark;background:#101114;color:#f4f5f7}
+*{box-sizing:border-box} body{margin:0;background:#101114;color:#f4f5f7} .wrap{max-width:980px;margin:auto;padding:18px}
+h1{font-size:24px;margin:0 0 6px}.sub{opacity:.72;margin:0 0 18px;line-height:1.45}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:#181a1f;border:1px solid #2b2f37;border-radius:14px;padding:16px}.full{grid-column:1/-1}
+h2{font-size:17px;margin:0 0 12px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:9px 0}.grow{flex:1}.btn{appearance:none;border:1px solid #404652;background:#252a33;color:#fff;border-radius:10px;padding:11px 14px;font-weight:700;cursor:pointer}.btn.primary{background:#f2f3f5;color:#111;border-color:#f2f3f5}.btn.danger{background:#351b1f;border-color:#6b2932}.btn:disabled{opacity:.4;cursor:not-allowed}input[type=file],select{width:100%;background:#111318;color:#fff;border:1px solid #363b45;border-radius:9px;padding:11px}.stat{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;background:#111318;border:1px solid #2c313a;border-radius:10px;padding:10px;white-space:pre-wrap;line-height:1.45;min-height:80px}.bar{height:10px;border-radius:99px;background:#111318;overflow:hidden;border:1px solid #2c313a}.bar>i{display:block;height:100%;width:0;background:#d9dce2;transition:width .1s}.small{font-size:12px;opacity:.68;line-height:1.45}.ok{color:#8ee6a8}.bad{color:#ff9aa4}.warn{color:#ffd58a}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.pill{border:1px solid #3a404b;border-radius:999px;padding:5px 8px;font-size:12px;opacity:.85}
+.debug-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.debugbox{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;background:#0d0f13;border:1px solid #2c313a;border-radius:10px;padding:10px;white-space:pre-wrap;line-height:1.42;min-height:160px;max-height:330px;overflow:auto}.meterrow{display:grid;grid-template-columns:70px 1fr 88px;gap:8px;align-items:center;margin:7px 0;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}.meter{height:9px;border-radius:99px;background:#111318;border:1px solid #2c313a;overflow:hidden}.meter>i{display:block;height:100%;width:0;background:#d9dce2;transition:width .08s}.debugFrozen{outline:2px solid #ffd58a}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+@media(max-width:760px){.grid{grid-template-columns:1fr}.full{grid-column:auto}.wrap{padding:12px}h1{font-size:21px}.btn{flex:1}.debug-grid{grid-template-columns:1fr}.debugbox{max-height:260px}.meterrow{grid-template-columns:58px 1fr 78px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>NanaAudio Acoustic v1.1 Debug</h1>
+  <p class="sub">Truyền file trực tiếp bằng <b>loa ↔ microphone</b>, không cần mạng. Bản này ưu tiên kiểm chứng đường truyền thực tế: packet + SHA-256 + CRC32 + OFDM, chạy trong một file HTML.</p>
+
+  <div class="grid">
+    <section class="card">
+      <h2>1. Cấu hình</h2>
+      <div class="row"><select id="profile">
+        <option value="robust">ROBUST — BPSK + lặp 3, ~1.2 kbps net</option>
+        <option value="fast" selected>FAST — QPSK, ~14 kbps raw</option>
+        <option value="turbo">TURBO — 16-QAM, ~44 kbps raw</option>
+      </select></div>
+      <div id="profileInfo" class="stat"></div>
+      <p class="small">Khuyến nghị lần đầu: FAST, khoảng cách 10–30 cm, âm lượng 50–75%. TURBO cần loa/mic tuyến tính và SNR tốt hơn.</p>
+    </section>
+
+    <section class="card">
+      <h2>2. Tự kiểm tra</h2>
+      <div class="row"><button id="selfTest" class="btn">Chạy self-test</button><span id="testBadge" class="pill">chưa chạy</span></div>
+      <div id="testLog" class="stat">Kiểm tra CRC, packet, bitstream và mô phỏng OFDM qua kênh có noise + echo.</div>
+    </section>
+
+    <section class="card">
+      <h2>3. Gửi file</h2>
+      <input id="file" type="file" />
+      <div class="row">
+        <button id="prepare" class="btn primary">Chuẩn bị âm thanh</button>
+        <button id="play" class="btn" disabled>Phát qua loa</button>
+        <button id="stopPlay" class="btn danger" disabled>Dừng</button>
+      </div>
+      <div class="row"><button id="saveWav" class="btn" disabled>Lưu WAV kiểm thử</button></div>
+      <div class="bar"><i id="txBar"></i></div>
+      <div id="txStat" class="stat">Chưa chọn file.</div>
+      <p class="small">Để tránh treo trình duyệt, prototype tự chặn transmission quá 120 giây hoặc waveform vượt 32 MB. Giới hạn thực tế thay đổi theo profile.</p>
+    </section>
+
+    <section class="card">
+      <h2>4. Nhận file</h2>
+      <div class="row">
+        <button id="record" class="btn primary">Bắt đầu thu</button>
+        <button id="stopRecord" class="btn danger" disabled>Dừng & giải mã</button>
+      </div>
+      <div class="bar"><i id="rxBar"></i></div>
+      <div id="rxStat" class="stat">Đặt micro gần loa rồi bấm “Bắt đầu thu”.</div>
+      <div class="row"><button id="downloadRx" class="btn" disabled>Tải file đã nhận</button></div>
+      <p class="small">Trình duyệt sẽ hỏi quyền microphone. Nếu mở <code>file://</code> mà điện thoại chặn micro, chạy cùng file này qua HTTPS hoặc localhost.</p>
+    </section>
+
+    <section class="card full" id="debugCard">
+      <h2>5. Giám sát &amp; debug</h2>
+      <div class="row">
+        <span id="debugBadge" class="pill">IDLE</span>
+        <button id="freezeDebug" class="btn">Đóng băng màn hình</button>
+        <button id="copyDebug" class="btn">Copy báo cáo debug</button>
+        <button id="clearDebug" class="btn">Xóa log</button>
+      </div>
+      <div class="meterrow"><span>MIC RMS</span><div class="meter"><i id="rmsMeter"></i></div><span id="rmsText">— dBFS</span></div>
+      <div class="meterrow"><span>MIC PEAK</span><div class="meter"><i id="peakMeter"></i></div><span id="peakText">— dBFS</span></div>
+      <div class="debug-grid">
+        <div><div class="small">TÓM TẮT CHẨN ĐOÁN — ưu tiên chụp ô này</div><div id="debugSummary" class="debugbox">Đang khởi tạo…</div></div>
+        <div><div class="small">EVENT LOG — các bước gần nhất</div><div id="debugLog" class="debugbox">Chưa có sự kiện.</div></div>
+      </div>
+      <p class="small">Khi lỗi: bấm <b>Đóng băng màn hình</b>, chụp trọn ô “Tóm tắt chẩn đoán” + phần cuối “Event log” rồi gửi lại. Clipping nên gần 0%; sync score càng gần 1 càng tốt; pilot EVM càng thấp càng tốt.</p>
+    </section>
+
+    <section class="card full">
+      <h2>Thông số giao thức v1</h2>
+      <div class="stat">48 kHz protocol clock · FFT 1024 · cyclic prefix 128 · 3 training symbols · pilots mỗi 12 carrier · equalization theo từng subcarrier · SHA-256 file · CRC32 toàn packet · UTF-8 filename/MIME.
+
+Không truyền KEY hay dữ liệu bí mật nào ngoài chính nội dung file. Đây là modem truyền dữ liệu, không phải lớp mã hóa bảo mật.</div>
+    </section>
+  </div>
+</div>
+<script>
+(() => {
+'use strict';
+
+const SR = 48000, N = 1024, CP = 128, SYM = N + CP;
+const SYNC_TONE_SEC = 0.24, SYNC_GAP_SEC = 0.08, TAIL_SEC = 0.12, TRAIN_COUNT = 3;
+const MAX_FILE = 5 * 1024 * 1024, MAX_AUDIO_SECONDS = 120, MAX_WAVE_MB = 32;
+const PROFILES = {
+  robust:{name:'ROBUST', first:50, count:96, mod:'bpsk', bpc:1, fec:'rep3'},
+  fast:{name:'FAST', first:50, count:192, mod:'qpsk', bpc:2, fec:'none'},
+  turbo:{name:'TURBO', first:50, count:288, mod:'qam16', bpc:4, fec:'none'}
+};
+
+const $ = id => document.getElementById(id);
+const enc = new TextEncoder(), dec = new TextDecoder();
+let txSamples=null, txMeta=null, txSource=null, txCtx=null, rxBlob=null, rxName='received.bin';
+let rxCtx=null, rxStream=null, rxNode=null, rxSink=null, rxChunks=[], rxRecording=false;
+let rxInputSampleRate=null, rxTrackSettings=null, rxDeviceLabel='', rxDevices=[];
+let debugLines=[], debugFrozen=false, lastError='', lastDecode=null, lastRxCapture=null;
+let liveMic={rms:0,peak:0,clip:0,clipSamples:0,totalSamples:0,lastUi:0};
+const DEBUG_MAX_LINES=160;
+
+function nowStamp(){const d=new Date();return d.toLocaleTimeString('vi-VN',{hour12:false})+'.'+String(d.getMilliseconds()).padStart(3,'0');}
+function dlog(tag,msg=''){const line=`${nowStamp()}  ${tag}${msg?'  '+msg:''}`;debugLines.push(line);if(debugLines.length>DEBUG_MAX_LINES)debugLines.splice(0,debugLines.length-DEBUG_MAX_LINES);if(!debugFrozen&&$('debugLog'))$('debugLog').textContent=debugLines.join('\n');updateDebugSummary();}
+function dbfs(v){return v>1e-9?20*Math.log10(v):-120;}
+function dbText(v){const d=dbfs(v);return d<=-119?'−∞ dBFS':d.toFixed(1)+' dBFS';}
+function meterPctDb(v){const d=Math.max(-60,Math.min(0,dbfs(v)));return ((d+60)/60)*100;}
+function fmtSetting(v){return v===undefined?'n/a':String(v);}
+function browserShort(){const ua=navigator.userAgent;const m=ua.match(/(Edg|Chrome|CriOS|Firefox|FxiOS|Version)\/([\d.]+)/);return m?`${m[1]} ${m[2]}`:ua.slice(0,76);}
+function updateMicMeters(force=false){if(debugFrozen&&!force)return;if(!$('rmsMeter'))return;$('rmsMeter').style.width=meterPctDb(liveMic.rms)+'%';$('peakMeter').style.width=meterPctDb(liveMic.peak)+'%';$('rmsText').textContent=dbText(liveMic.rms);$('peakText').textContent=dbText(liveMic.peak);}
+function debugReport(){
+  const p=profile(), st=rxTrackSettings||{}, clipPct=liveMic.totalSamples?100*liveMic.clipSamples/liveMic.totalSamples:0;
+  const lines=[
+    `NanaAudio Acoustic v1.1 Debug`,
+    `Time: ${new Date().toLocaleString('vi-VN')}`,
+    `Profile: ${p.name} / ${p.mod.toUpperCase()} / FEC ${p.fec}`,
+    `Page: ${location.protocol}  secureContext=${window.isSecureContext}`,
+    `Browser: ${browserShort()}`,
+    `Screen: ${innerWidth}x${innerHeight} CSS px  DPR=${devicePixelRatio||1}`,
+    `RX state: ${rxRecording?'RECORDING':'idle'}  AudioContext=${rxInputSampleRate||'—'} Hz`,
+    `Mic: ${rxDeviceLabel||'—'}`,
+    `Track sampleRate=${fmtSetting(st.sampleRate)} channelCount=${fmtSetting(st.channelCount)}`,
+    `echoCancellation=${fmtSetting(st.echoCancellation)} noiseSuppression=${fmtSetting(st.noiseSuppression)} autoGainControl=${fmtSetting(st.autoGainControl)}`,
+    `LIVE RMS=${dbText(liveMic.rms)}  PEAK=${dbText(liveMic.peak)}  clipping=${clipPct.toFixed(3)}%`,
+  ];
+  if(txMeta)lines.push(`TX: ${txMeta.file} / ${fmtBytes(txMeta.size)} / ${txMeta.nSym} sym / ${fmtTime(txMeta.duration)} / wave ${(txSamples?.byteLength/1048576||0).toFixed(1)} MB`);
+  else lines.push(`TX: chưa chuẩn bị`);
+  if(lastRxCapture)lines.push(`Last capture: ${fmtTime(lastRxCapture.duration)} / RMS ${dbText(lastRxCapture.rms)} / PEAK ${dbText(lastRxCapture.peak)} / clip ${lastRxCapture.clipPct.toFixed(3)}%`);
+  if(lastDecode){
+    lines.push(`SYNC: start=${lastDecode.toneStart} samples / score=${lastDecode.syncScore.toFixed(3)} / SNR≈${Number.isFinite(lastDecode.snrDb)?lastDecode.snrDb.toFixed(1)+' dB':'n/a'}`);
+    lines.push(`OFDM: symbols=${lastDecode.nSym} / pilot EVM=${Number.isFinite(lastDecode.evmPct)?lastDecode.evmPct.toFixed(1)+'%':'n/a'} / train |H|=${lastDecode.channelMag.toFixed(2)}`);
+  }else lines.push(`SYNC/OFDM: chưa có lần decode`);
+  lines.push(`Last error: ${lastError||'—'}`);
+  lines.push(`Debug lines: ${debugLines.length}`);
+  return lines.join('\n');
+}
+function updateDebugSummary(force=false){if(debugFrozen&&!force)return;if($('debugSummary'))$('debugSummary').textContent=debugReport();if($('debugBadge')){$('debugBadge').textContent=rxRecording?'RECORDING':(lastError?'ERROR':'READY');$('debugBadge').className='pill '+(rxRecording?'warn':lastError?'bad':'ok');}}
+function setLastError(where,e){lastError=`${where}: ${e?.message||e}`;dlog('ERROR',lastError);}
+function captureStats(x,sr){let ss=0,pk=0,cl=0;for(let i=0;i<x.length;i++){const a=Math.abs(x[i]);ss+=x[i]*x[i];if(a>pk)pk=a;if(a>=.985)cl++;}return{duration:x.length/sr,rms:Math.sqrt(ss/Math.max(1,x.length)),peak:pk,clipPct:100*cl/Math.max(1,x.length)};}
+
+function profile(){ return PROFILES[$('profile').value]; }
+function activeBins(p){ return Array.from({length:p.count},(_,i)=>p.first+i); }
+function isPilotIndex(i){ return i % 12 === 0; }
+function dataBins(p){ return activeBins(p).filter((_,i)=>!isPilotIndex(i)); }
+function capacityBits(p){ return dataBins(p).length * p.bpc; }
+function fmtBytes(n){ if(n<1024)return n+' B'; if(n<1048576)return (n/1024).toFixed(1)+' KB'; return (n/1048576).toFixed(2)+' MB'; }
+function fmtTime(sec){ if(sec<60)return sec.toFixed(1)+' s'; return Math.floor(sec/60)+'m '+Math.round(sec%60)+'s'; }
+function log(el, s){ el.textContent=s; }
+function setBar(el,v){ el.style.width=Math.max(0,Math.min(100,v))+'%'; }
+
+function updateProfileInfo(){
+  const p=profile(), cap=capacityBits(p), raw=cap/(SYM/SR), net=raw/(p.fec==='rep3'?3:1), overhead=SYNC_TONE_SEC+SYNC_GAP_SEC+TRAIN_COUNT*SYM/SR+TAIL_SEC, approx=Math.max(0,Math.floor((MAX_AUDIO_SECONDS-overhead)*net/8)-256);
+  log($('profileInfo'), `${p.name}\nCarrier: ${p.count} (${(p.first*SR/N/1000).toFixed(1)}–${((p.first+p.count-1)*SR/N/1000).toFixed(1)} kHz)\nData carrier: ${dataBins(p).length}\nĐiều chế: ${p.mod.toUpperCase()} · FEC: ${p.fec}\nRaw ≈ ${(raw/1000).toFixed(1)} kbps · payload lý thuyết ≈ ${(net/1000).toFixed(1)} kbps\nFile khuyến nghị ≤ ~${fmtBytes(approx)} / lượt (${MAX_AUDIO_SECONDS}s)`);
+}
+$('profile').addEventListener('change',()=>{updateProfileInfo(); txSamples=null; $('play').disabled=true; $('saveWav').disabled=true; dlog('PROFILE',profile().name);});
+updateProfileInfo();
+dlog('BOOT',`profile=${profile().name} secure=${window.isSecureContext} protocol=${location.protocol}`);
+
+// ---------- Integrity / packet ----------
+let crcTable=null;
+function makeCrcTable(){
+  const t=new Uint32Array(256); for(let n=0;n<256;n++){let c=n; for(let k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0;} return t;
+}
+function crc32(u8){ if(!crcTable)crcTable=makeCrcTable(); let c=0xFFFFFFFF; for(const b of u8)c=crcTable[(c^b)&255]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+function sha256Pure(u8){
+  const K=new Uint32Array([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+  const ro=(x,n)=>(x>>>n)|(x<<(32-n)), L=u8.length, bitLen=L*8, padLen=((L+9+63)>>6)<<6, msg=new Uint8Array(padLen);msg.set(u8);msg[L]=0x80;
+  const dv=new DataView(msg.buffer);const hi=Math.floor(bitLen/0x100000000),lo=bitLen>>>0;dv.setUint32(padLen-8,hi,false);dv.setUint32(padLen-4,lo,false);
+  let h0=0x6a09e667,h1=0xbb67ae85,h2=0x3c6ef372,h3=0xa54ff53a,h4=0x510e527f,h5=0x9b05688c,h6=0x1f83d9ab,h7=0x5be0cd19;const w=new Uint32Array(64);
+  for(let o=0;o<padLen;o+=64){for(let i=0;i<16;i++)w[i]=dv.getUint32(o+i*4,false);for(let i=16;i<64;i++){const s0=(ro(w[i-15],7)^ro(w[i-15],18)^(w[i-15]>>>3))>>>0,s1=(ro(w[i-2],17)^ro(w[i-2],19)^(w[i-2]>>>10))>>>0;w[i]=(w[i-16]+s0+w[i-7]+s1)>>>0;}let a=h0,b=h1,c=h2,d=h3,e=h4,f=h5,g=h6,h=h7;for(let i=0;i<64;i++){const S1=(ro(e,6)^ro(e,11)^ro(e,25))>>>0,ch=((e&f)^((~e)&g))>>>0,t1=(h+S1+ch+K[i]+w[i])>>>0,S0=(ro(a,2)^ro(a,13)^ro(a,22))>>>0,maj=((a&b)^(a&c)^(b&c))>>>0,t2=(S0+maj)>>>0;h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;}h0=(h0+a)>>>0;h1=(h1+b)>>>0;h2=(h2+c)>>>0;h3=(h3+d)>>>0;h4=(h4+e)>>>0;h5=(h5+f)>>>0;h6=(h6+g)>>>0;h7=(h7+h)>>>0;}
+  const out=new Uint8Array(32),odv=new DataView(out.buffer);[h0,h1,h2,h3,h4,h5,h6,h7].forEach((v,i)=>odv.setUint32(i*4,v,false));return out;
+}
+async function sha256(u8){if(globalThis.crypto&&crypto.subtle){return new Uint8Array(await crypto.subtle.digest('SHA-256',u8));}return sha256Pure(u8);}
+function writeU16(a,o,v){a[o]=v&255;a[o+1]=(v>>>8)&255;} function writeU32(a,o,v){a[o]=v&255;a[o+1]=(v>>>8)&255;a[o+2]=(v>>>16)&255;a[o+3]=(v>>>24)&255;}
+function readU16(a,o){return a[o]|(a[o+1]<<8)} function readU32(a,o){return (a[o]|(a[o+1]<<8)|(a[o+2]<<16)|(a[o+3]<<24))>>>0;}
+async function packBytes(name,mime,data){
+  const nb=enc.encode(name), mb=enc.encode(mime||'application/octet-stream');
+  if(nb.length>65535||mb.length>65535)throw new Error('Tên file/MIME quá dài');
+  const hash=await sha256(data); const baseLen=45+nb.length+mb.length+data.length; const out=new Uint8Array(baseLen+4);
+  out.set([78,65,65,49],0); out[4]=1; writeU16(out,5,nb.length); writeU16(out,7,mb.length); writeU32(out,9,data.length); out.set(hash,13);
+  let o=45; out.set(nb,o);o+=nb.length;out.set(mb,o);o+=mb.length;out.set(data,o);o+=data.length; writeU32(out,o,crc32(out.subarray(0,o))); return out;
+}
+async function unpackBytes(bytes){
+  if(bytes.length<49)throw new Error('Packet quá ngắn'); if(bytes[0]!==78||bytes[1]!==65||bytes[2]!==65||bytes[3]!==49)throw new Error('Không tìm thấy magic NAA1'); if(bytes[4]!==1)throw new Error('Version không hỗ trợ');
+  const nl=readU16(bytes,5), ml=readU16(bytes,7), size=readU32(bytes,9), total=45+nl+ml+size+4; if(total>bytes.length)throw new Error(`Thiếu dữ liệu: cần ${total}, có ${bytes.length}`);
+  const got=readU32(bytes,total-4), calc=crc32(bytes.subarray(0,total-4)); if(got!==calc)throw new Error(`CRC32 sai: ${got.toString(16)} != ${calc.toString(16)}`);
+  let o=45; const name=dec.decode(bytes.subarray(o,o+nl));o+=nl; const mime=dec.decode(bytes.subarray(o,o+ml));o+=ml; const data=bytes.slice(o,o+size); const hash=await sha256(data); for(let i=0;i<32;i++)if(hash[i]!==bytes[13+i])throw new Error('SHA-256 không khớp');
+  return {name,mime,data,total};
+}
+
+// ---------- bits / simple FEC ----------
+function bytesToBits(a){const out=new Uint8Array(a.length*8);let j=0;for(const b of a)for(let k=7;k>=0;k--)out[j++]=(b>>>k)&1;return out;}
+function bitsToBytes(bits){const n=Math.floor(bits.length/8),out=new Uint8Array(n);for(let i=0;i<n;i++){let b=0;for(let k=0;k<8;k++)b=(b<<1)|bits[i*8+k];out[i]=b;}return out;}
+function rep3Encode(bits){const o=new Uint8Array(bits.length*3);for(let i=0;i<bits.length;i++){o[i*3]=o[i*3+1]=o[i*3+2]=bits[i];}return o;}
+function rep3Decode(bits){const n=Math.floor(bits.length/3),o=new Uint8Array(n);for(let i=0;i<n;i++)o[i]=(bits[i*3]+bits[i*3+1]+bits[i*3+2]>=2)?1:0;return o;}
+
+// ---------- FFT ----------
+function fft(re,im,inverse=false){
+  const n=re.length; for(let i=1,j=0;i<n;i++){let bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]];}}
+  for(let len=2;len<=n;len<<=1){const ang=2*Math.PI/len*(inverse?1:-1),wr0=Math.cos(ang),wi0=Math.sin(ang);for(let i=0;i<n;i+=len){let wr=1,wi=0;for(let j=0;j<len/2;j++){const uR=re[i+j],uI=im[i+j],vR=re[i+j+len/2]*wr-im[i+j+len/2]*wi,vI=re[i+j+len/2]*wi+im[i+j+len/2]*wr;re[i+j]=uR+vR;im[i+j]=uI+vI;re[i+j+len/2]=uR-vR;im[i+j+len/2]=uI-vI;const nw=wr*wr0-wi*wi0;wi=wr*wi0+wi*wr0;wr=nw;}}}
+  if(inverse)for(let i=0;i<n;i++){re[i]/=n;im[i]/=n;}
+}
+function trainVal(i){let x=((i+1)*1103515245+12345)>>>0;return (x&0x40000000)?1:-1;}
+function pilotVal(i,s){return ((i+s)&1)?-1:1;}
+function mapSym(bits,off,p){
+  if(p.mod==='bpsk')return [bits[off]? -1:1,0,1];
+  if(p.mod==='qpsk'){const a=bits[off]? -1:1,b=bits[off+1]? -1:1,q=Math.SQRT1_2;return[a*q,b*q,2];}
+  const lev=(b0,b1)=>{if(b0===0&&b1===0)return 3;if(b0===0&&b1===1)return 1;if(b0===1&&b1===1)return -1;return -3;}; const q=1/Math.sqrt(10); return[lev(bits[off],bits[off+1])*q,lev(bits[off+2],bits[off+3])*q,4];
+}
+function demapSym(r,i,p,out){
+  if(p.mod==='bpsk'){out.push(r<0?1:0);return;}
+  if(p.mod==='qpsk'){out.push(r<0?1:0,i<0?1:0);return;}
+  const dem=v=>{v*=Math.sqrt(10); if(v>2)return[0,0]; if(v>0)return[0,1]; if(v>-2)return[1,1]; return[1,0];}; const a=dem(r),b=dem(i);out.push(a[0],a[1],b[0],b[1]);
+}
+function makeOfdmSymbol(p,bits=null,bitOff=0,symIndex=0,training=false){
+  const re=new Float64Array(N),im=new Float64Array(N),bins=activeBins(p); let used=0;
+  for(let ci=0;ci<bins.length;ci++){
+    const k=bins[ci]; let r=0,q=0;
+    if(training){r=trainVal(ci);} else if(isPilotIndex(ci)){r=pilotVal(ci,symIndex);} else {const m=mapSym(bits,bitOff+used,p);r=m[0];q=m[1];used+=m[2];}
+    re[k]=r;im[k]=q;re[N-k]=r;im[N-k]=-q;
+  }
+  fft(re,im,true); const gain=0.10*N/Math.sqrt(2*p.count); const td=new Float32Array(SYM); for(let i=0;i<CP;i++)td[i]=Math.max(-.95,Math.min(.95,re[N-CP+i]*gain)); for(let i=0;i<N;i++)td[CP+i]=Math.max(-.95,Math.min(.95,re[i]*gain)); return {samples:td,used};
+}
+function concatFloat(parts){let n=0;for(const p of parts)n+=p.length;const o=new Float32Array(n);let x=0;for(const p of parts){o.set(p,x);x+=p.length;}return o;}
+function syncTone(){const n=Math.round(SYNC_TONE_SEC*SR),o=new Float32Array(n),f0=700,f1=7000,T=n/SR,k=(f1-f0)/T;for(let i=0;i<n;i++){const t=i/SR,ramp=Math.min(1,i/240,(n-1-i)/240),phase=2*Math.PI*(f0*t+0.5*k*t*t);o[i]=0.45*ramp*Math.sin(phase);}return o;}
+function buildTransmission(packet,p){
+  let bits=bytesToBits(packet); if(p.fec==='rep3')bits=rep3Encode(bits); const cap=capacityBits(p), nSym=Math.ceil(bits.length/cap), padded=new Uint8Array(nSym*cap);padded.set(bits);
+  const parts=[syncTone(),new Float32Array(Math.round(SYNC_GAP_SEC*SR))]; for(let t=0;t<TRAIN_COUNT;t++)parts.push(makeOfdmSymbol(p,null,0,t,true).samples);
+  let off=0;for(let s=0;s<nSym;s++){const m=makeOfdmSymbol(p,padded,off,s,false);parts.push(m.samples);off+=m.used;} parts.push(new Float32Array(Math.round(TAIL_SEC*SR)));
+  return {samples:concatFloat(parts),nSym,encodedBits:bits.length,cap,duration:parts.reduce((a,b)=>a+b.length,0)/SR};
+}
+function transmissionPlan(packetBytes,p){
+  const cap=capacityBits(p), encodedBits=packetBytes*8*(p.fec==='rep3'?3:1), nSym=Math.ceil(encodedBits/cap), totalSamples=Math.round(SYNC_TONE_SEC*SR)+Math.round(SYNC_GAP_SEC*SR)+TRAIN_COUNT*SYM+nSym*SYM+Math.round(TAIL_SEC*SR); return {cap,encodedBits,nSym,totalSamples,duration:totalSamples/SR,waveMB:totalSamples*4/1048576};
+}
+async function buildTransmissionAsync(packet,p,onProgress){
+  let bits=bytesToBits(packet);if(p.fec==='rep3')bits=rep3Encode(bits);const cap=capacityBits(p),nSym=Math.ceil(bits.length/cap),padded=new Uint8Array(nSym*cap);padded.set(bits);
+  const parts=[syncTone(),new Float32Array(Math.round(SYNC_GAP_SEC*SR))];for(let t=0;t<TRAIN_COUNT;t++)parts.push(makeOfdmSymbol(p,null,0,t,true).samples);
+  let off=0;for(let s=0;s<nSym;s++){const m=makeOfdmSymbol(p,padded,off,s,false);parts.push(m.samples);off+=m.used;if((s&31)===31){if(onProgress)onProgress((s+1)/nSym);await new Promise(r=>setTimeout(r,0));}}
+  parts.push(new Float32Array(Math.round(TAIL_SEC*SR)));if(onProgress)onProgress(1);return {samples:concatFloat(parts),nSym,encodedBits:bits.length,cap,duration:parts.reduce((a,b)=>a+b.length,0)/SR};
+}
+
+// ---------- Receiver ----------
+function findToneStart(x){
+  let max=0;for(let i=0;i<x.length;i++){const a=Math.abs(x[i]);if(a>max)max=a;} if(max<1e-4)throw new Error('Không có tín hiệu âm thanh');
+  const th=max*0.08,w=64;let sum=0;for(let i=0;i<w&&i<x.length;i++)sum+=Math.abs(x[i]);let coarse=-1;
+  for(let i=0;i<x.length-w;i++){if(sum/w>th){coarse=i;break;}sum-=Math.abs(x[i]);sum+=Math.abs(x[i+w]);}
+  if(coarse<0)throw new Error('Không tìm thấy sync chirp');
+  const ref=syncTone(),L=Math.min(2048,ref.length),lo=Math.max(0,coarse-256),hi=Math.min(x.length-L,coarse+128);let refE=0;for(let j=0;j<L;j+=2)refE+=ref[j]*ref[j];let best=coarse,bestScore=-1;
+  for(let i=lo;i<=hi;i++){let c=0,e=0;for(let j=0;j<L;j+=2){const v=x[i+j];c+=v*ref[j];e+=v*v;}const score=Math.abs(c)/Math.sqrt((e+1e-12)*(refE+1e-12));if(score>bestScore){bestScore=score;best=i;}}
+  return {start:best,score:bestScore,coarse,max};
+}
+function resampleLinear(input,inSR,outSR=SR){if(Math.abs(inSR-outSR)<1)return input;const n=Math.floor(input.length*outSR/inSR),o=new Float32Array(n),r=inSR/outSR;for(let i=0;i<n;i++){const x=i*r,j=Math.floor(x),f=x-j;o[i]=(input[j]||0)*(1-f)+(input[j+1]||0)*f;}return o;}
+function cdiv(ar,ai,br,bi){const d=br*br+bi*bi+1e-12;return[(ar*br+ai*bi)/d,(ai*br-ar*bi)/d];}
+function decodeTransmission(input,p){
+  const x=input, sync=findToneStart(x), toneStart=sync.start, trainStart=toneStart+Math.round((SYNC_TONE_SEC+SYNC_GAP_SEC)*SR); if(trainStart+TRAIN_COUNT*SYM+SYM>x.length)throw new Error('Bản ghi quá ngắn'); const bins=activeBins(p), hr=new Float64Array(bins.length),hi=new Float64Array(bins.length);
+  for(let t=0;t<TRAIN_COUNT;t++){const start=trainStart+t*SYM+CP,re=new Float64Array(N),im=new Float64Array(N);for(let i=0;i<N;i++)re[i]=x[start+i]||0;fft(re,im,false);for(let ci=0;ci<bins.length;ci++){const k=bins[ci],v=trainVal(ci);hr[ci]+=re[k]/v;hi[ci]+=im[k]/v;}}
+  let hsum=0;for(let i=0;i<bins.length;i++){hr[i]/=TRAIN_COUNT;hi[i]/=TRAIN_COUNT;hsum+=Math.hypot(hr[i],hi[i]);}
+  const channelMag=hsum/Math.max(1,bins.length);
+  const dataStart=trainStart+TRAIN_COUNT*SYM, usable=x.length-dataStart-Math.round(TAIL_SEC*SR), nSym=Math.max(0,Math.floor((usable+CP)/SYM)); if(nSym<1)throw new Error('Không có OFDM data symbol'); const out=[];let evmErr=0,evmN=0;
+  for(let s=0;s<nSym;s++){
+    const start=dataStart+s*SYM+CP;if(start+N>x.length)break;const re=new Float64Array(N),im=new Float64Array(N);for(let i=0;i<N;i++)re[i]=x[start+i]||0;fft(re,im,false);
+    let cr=0,ciq=0,np=0;const eqR=new Float64Array(bins.length),eqI=new Float64Array(bins.length);
+    for(let ci=0;ci<bins.length;ci++){const k=bins[ci],q=cdiv(re[k],im[k],hr[ci],hi[ci]);eqR[ci]=q[0];eqI[ci]=q[1];if(isPilotIndex(ci)){const pv=pilotVal(ci,s);cr+=q[0]*pv;ciq+=q[1]*pv;np++;}}
+    cr/=np;ciq/=np; const gd=cr*cr+ciq*ciq+1e-12;
+    for(let ci=0;ci<bins.length;ci++){const rr=(eqR[ci]*cr+eqI[ci]*ciq)/gd,ii=(eqI[ci]*cr-eqR[ci]*ciq)/gd;if(isPilotIndex(ci)){const pv=pilotVal(ci,s);evmErr+=(rr-pv)*(rr-pv)+ii*ii;evmN++;continue;}demapSym(rr,ii,p,out);}
+  }
+  let noiseRms=NaN,signalRms=NaN,snrDb=NaN;
+  if(toneStart>Math.round(.015*SR)){let ss=0,n=0;const a=Math.max(0,toneStart-Math.round(.20*SR)),b=Math.max(a,toneStart-Math.round(.005*SR));for(let i=a;i<b;i++){ss+=x[i]*x[i];n++;}if(n)noiseRms=Math.sqrt(ss/n);}
+  {let ss=0,n=0;const a=toneStart,b=Math.min(x.length,toneStart+Math.round(SYNC_TONE_SEC*SR));for(let i=a;i<b;i++){ss+=x[i]*x[i];n++;}if(n)signalRms=Math.sqrt(ss/n);}
+  if(Number.isFinite(noiseRms)&&noiseRms>1e-9&&Number.isFinite(signalRms))snrDb=20*Math.log10(signalRms/noiseRms);
+  let bits=Uint8Array.from(out);if(p.fec==='rep3')bits=rep3Decode(bits);return {bytes:bitsToBytes(bits),toneStart,nSym,bits:bits.length,syncScore:sync.score,syncCoarse:sync.coarse,snrDb,channelMag,evmPct:evmN?100*Math.sqrt(evmErr/evmN):NaN};
+}
+
+// ---------- WAV ----------
+function wavBlob(samples,sr=SR){const ab=new ArrayBuffer(44+samples.length*2),dv=new DataView(ab);const ws=(o,s)=>{for(let i=0;i<s.length;i++)dv.setUint8(o+i,s.charCodeAt(i));};ws(0,'RIFF');dv.setUint32(4,36+samples.length*2,true);ws(8,'WAVE');ws(12,'fmt ');dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);dv.setUint32(24,sr,true);dv.setUint32(28,sr*2,true);dv.setUint16(32,2,true);dv.setUint16(34,16,true);ws(36,'data');dv.setUint32(40,samples.length*2,true);let o=44;for(let i=0;i<samples.length;i++,o+=2){const v=Math.max(-1,Math.min(1,samples[i]));dv.setInt16(o,v<0?v*32768:v*32767,true);}return new Blob([ab],{type:'audio/wav'});}
+function saveBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);}
+
+// ---------- TX UI ----------
+$('prepare').onclick=async()=>{
+  try{
+    const f=$('file').files[0];if(!f)throw new Error('Chưa chọn file');if(f.size>MAX_FILE)throw new Error('Prototype giới hạn 5 MB');lastError='';dlog('TX PREP',`${f.name} ${f.size}B profile=${profile().name}`);$('prepare').disabled=true;log($('txStat'),'Đang đóng gói + SHA-256…');setBar($('txBar'),10);
+    const data=new Uint8Array(await f.arrayBuffer()),packet=await packBytes(f.name,f.type,data),p=profile(),plan=transmissionPlan(packet.length,p);if(plan.duration>MAX_AUDIO_SECONDS||plan.waveMB>MAX_WAVE_MB)throw new Error(`File quá lớn cho ${p.name}: ước tính ${fmtTime(plan.duration)}, ${plan.waveMB.toFixed(1)} MB waveform. Hãy dùng file nhỏ hơn hoặc profile nhanh hơn.`);setBar($('txBar'),35);await new Promise(r=>setTimeout(r,0));const b=await buildTransmissionAsync(packet,p,q=>setBar($('txBar'),35+60*q));txSamples=b.samples;txMeta={file:f.name,size:f.size,packet:packet.length,...b};dlog('TX READY',`${b.nSym} sym ${b.duration.toFixed(2)}s wave=${(b.samples.byteLength/1048576).toFixed(1)}MB`);setBar($('txBar'),100);$('play').disabled=false;$('saveWav').disabled=false;log($('txStat'),`Sẵn sàng\nFile: ${f.name}\nDung lượng: ${fmtBytes(f.size)}\nPacket: ${fmtBytes(packet.length)}\nOFDM symbols: ${b.nSym}\nThời lượng phát: ${fmtTime(b.duration)}\nWaveform RAM: ${(b.samples.byteLength/1048576).toFixed(1)} MB\nSample: ${b.samples.length.toLocaleString()}`);
+  }catch(e){setLastError('TX prepare',e);log($('txStat'),'LỖI: '+e.message);setBar($('txBar'),0);}finally{$('prepare').disabled=false;}
+};
+$('play').onclick=async()=>{
+  if(!txSamples)return;try{txCtx=new (window.AudioContext||window.webkitAudioContext)();await txCtx.resume();const buf=txCtx.createBuffer(1,txSamples.length,SR);buf.copyToChannel(txSamples,0);txSource=txCtx.createBufferSource();txSource.buffer=buf;txSource.connect(txCtx.destination);txSource.onended=()=>{$('play').disabled=false;$('stopPlay').disabled=true;};txSource.start();dlog('TX PLAY',`ctx=${txCtx.sampleRate}Hz samples=${txSamples.length}`);$('play').disabled=true;$('stopPlay').disabled=false;log($('txStat'),$('txStat').textContent+'\n\nĐANG PHÁT…');}catch(e){setLastError('TX play',e);log($('txStat'),'LỖI phát: '+e.message);}
+};
+$('stopPlay').onclick=()=>{try{txSource&&txSource.stop();}catch{}dlog('TX STOP','manual');$('play').disabled=false;$('stopPlay').disabled=true;};
+$('saveWav').onclick=()=>{if(txSamples)saveBlob(wavBlob(txSamples),'NanaAudio_acoustic.wav');};
+
+// ---------- RX UI ----------
+$('record').onclick=async()=>{
+  try{
+    rxChunks=[];rxBlob=null;lastDecode=null;lastRxCapture=null;lastError='';liveMic={rms:0,peak:0,clip:0,clipSamples:0,totalSamples:0,lastUi:0};$('downloadRx').disabled=true;
+    dlog('RX START',`request mic / profile=${profile().name}`);
+    rxStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1}});
+    const track=rxStream.getAudioTracks()[0];rxTrackSettings=track?.getSettings?track.getSettings():{};rxDeviceLabel=track?.label||'';
+    try{rxDevices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput').map(d=>d.label||'(audio input)');}catch{}
+    rxCtx=new (window.AudioContext||window.webkitAudioContext)({sampleRate:SR});await rxCtx.resume();rxInputSampleRate=rxCtx.sampleRate;
+    const src=rxCtx.createMediaStreamSource(rxStream);rxNode=rxCtx.createScriptProcessor(4096,1,1);rxSink=rxCtx.createGain();rxSink.gain.value=0;
+    rxNode.onaudioprocess=e=>{if(!rxRecording)return;const ch=e.inputBuffer.getChannelData(0),copy=new Float32Array(ch);rxChunks.push(copy);let ss=0,pk=0,cl=0;for(let i=0;i<ch.length;i++){const a=Math.abs(ch[i]);ss+=ch[i]*ch[i];if(a>pk)pk=a;if(a>=.985)cl++;}const r=Math.sqrt(ss/ch.length);liveMic.rms=liveMic.rms?liveMic.rms*.72+r*.28:r;liveMic.peak=Math.max(pk,liveMic.peak*.88);liveMic.clipSamples+=cl;liveMic.totalSamples+=ch.length;const n=performance.now();if(n-liveMic.lastUi>120){liveMic.lastUi=n;updateMicMeters();updateDebugSummary();}};
+    src.connect(rxNode);rxNode.connect(rxSink);rxSink.connect(rxCtx.destination);rxRecording=true;$('record').disabled=true;$('stopRecord').disabled=false;
+    dlog('MIC READY',`ctx=${rxCtx.sampleRate}Hz trackSR=${fmtSetting(rxTrackSettings.sampleRate)} EC=${fmtSetting(rxTrackSettings.echoCancellation)} NS=${fmtSetting(rxTrackSettings.noiseSuppression)} AGC=${fmtSetting(rxTrackSettings.autoGainControl)}`);
+    log($('rxStat'),`ĐANG THU…\nAudioContext: ${rxCtx.sampleRate} Hz\nMic: ${rxDeviceLabel||'mặc định'}\nProfile nhận: ${profile().name}\nTheo dõi MIC RMS/PEAK ở bảng Debug.\nSau khi máy gửi phát xong, bấm Dừng & giải mã.`);
+    updateDebugSummary();
+  }catch(e){setLastError('RX microphone',e);log($('rxStat'),'Không mở được microphone: '+e.message);}
+};
+$('stopRecord').onclick=async()=>{
+  rxRecording=false;$('record').disabled=false;$('stopRecord').disabled=true;const actualSr=rxInputSampleRate||rxCtx?.sampleRate||SR;
+  try{
+    if(rxStream)for(const t of rxStream.getTracks())t.stop();if(rxNode)rxNode.disconnect();if(rxCtx)await rxCtx.close();
+    const raw=concatFloat(rxChunks);rxChunks=[];lastRxCapture=captureStats(raw,actualSr);dlog('RX CAPTURE',`${lastRxCapture.duration.toFixed(2)}s rms=${dbText(lastRxCapture.rms)} peak=${dbText(lastRxCapture.peak)} clip=${lastRxCapture.clipPct.toFixed(3)}%`);
+    if(raw.length<actualSr/2)throw new Error('Bản ghi quá ngắn');setBar($('rxBar'),15);log($('rxStat'),`Đã thu ${fmtTime(raw.length/actualSr)}. Đang đồng bộ…`);await new Promise(r=>setTimeout(r,0));
+    const samples=resampleLinear(raw,actualSr,SR);const d=decodeTransmission(samples,profile());lastDecode=d;dlog('SYNC',`start=${d.toneStart} score=${d.syncScore.toFixed(3)} snr=${Number.isFinite(d.snrDb)?d.snrDb.toFixed(1):'n/a'}dB`);dlog('OFDM',`symbols=${d.nSym} evm=${Number.isFinite(d.evmPct)?d.evmPct.toFixed(1):'n/a'}% H=${d.channelMag.toFixed(2)}`);setBar($('rxBar'),70);await new Promise(r=>setTimeout(r,0));
+    const obj=await unpackBytes(d.bytes);setBar($('rxBar'),100);rxBlob=new Blob([obj.data],{type:obj.mime||'application/octet-stream'});rxName=obj.name||'received.bin';$('downloadRx').disabled=false;lastError='';dlog('RX OK',`${rxName} ${obj.data.length}B CRC=OK SHA=OK`);
+    log($('rxStat'),`THÀNH CÔNG\nFile: ${rxName}\nDung lượng: ${fmtBytes(obj.data.length)}\nCRC32: OK\nSHA-256: OK\nSync score: ${d.syncScore.toFixed(3)}\nSNR ước tính: ${Number.isFinite(d.snrDb)?d.snrDb.toFixed(1)+' dB':'n/a'}\nPilot EVM: ${Number.isFinite(d.evmPct)?d.evmPct.toFixed(1)+'%':'n/a'}\nOFDM symbols đọc: ${d.nSym}`);
+  }catch(e){setBar($('rxBar'),0);setLastError('RX decode',e);log($('rxStat'),'GIẢI MÃ THẤT BẠI: '+e.message+'\n\nHãy chụp ô Debug bên dưới. Thử: giảm profile xuống FAST/ROBUST, giảm âm lượng nếu clipping, đưa loa-mic gần hơn.');}
+  updateMicMeters(true);updateDebugSummary(true);
+};
+$('downloadRx').onclick=()=>{if(rxBlob)saveBlob(rxBlob,rxName);};
+
+// ---------- Self tests ----------
+function randBytes(n,seed=123456789){const o=new Uint8Array(n);let x=seed>>>0;for(let i=0;i<n;i++){x^=x<<13;x^=x>>>17;x^=x<<5;o[i]=x&255;}return o;}
+function gaussian(){let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function simulatedChannel(x){const pre=new Float32Array(Math.round(.11*SR)),o=new Float32Array(pre.length+x.length+160);for(let i=0;i<x.length;i++){const j=pre.length+i;o[j]+=x[i]*0.68;if(i>=73)o[j]+=x[i-73]*0.10;}for(let i=0;i<o.length;i++)o[i]+=gaussian()*0.0008;return o;}
+async function runSelfTest(){
+  const lines=[];const assert=(c,m)=>{if(!c)throw new Error(m);lines.push('✓ '+m);};
+  assert(crc32(enc.encode('123456789'))===0xCBF43926,'CRC32 chuẩn');
+  const raw=randBytes(4096), pkt=await packBytes('test.bin','application/octet-stream',raw), un=await unpackBytes(pkt);assert(un.data.length===raw.length&&un.data.every((v,i)=>v===raw[i]),'Packet + SHA-256 round-trip');
+  const bits=bytesToBits(raw), bytes=bitsToBytes(bits);assert(bytes.every((v,i)=>v===raw[i]),'Byte ↔ bit round-trip'); const rr=rep3Decode(rep3Encode(bits));assert(rr.every((v,i)=>v===bits[i]),'REP3 FEC round-trip');
+  for(const key of ['robust','fast','turbo']){
+    const p=PROFILES[key], tiny=randBytes(key==='robust'?96:384,0xA0B0C0D0), pk=await packBytes('x.dat','application/octet-stream',tiny), tx=buildTransmission(pk,p), ch=simulatedChannel(tx.samples), dd=decodeTransmission(ch,p), uu=await unpackBytes(dd.bytes); assert(uu.data.length===tiny.length&&uu.data.every((v,i)=>v===tiny[i]),`${p.name}: OFDM + noise + echo`);
+  }
+  return lines;
+}
+$('selfTest').onclick=async()=>{const b=$('testBadge');b.textContent='đang chạy';b.className='pill warn';dlog('SELFTEST','start');log($('testLog'),'Đang chạy…');try{const lines=await runSelfTest();log($('testLog'),lines.join('\n')+'\n\nALL TESTS PASSED');b.textContent='PASS';b.className='pill ok';lastError='';dlog('SELFTEST','PASS');}catch(e){setLastError('SELFTEST',e);log($('testLog'),'FAIL: '+e.message+'\n'+(e.stack||''));b.textContent='FAIL';b.className='pill bad';}};
+
+// ---------- Debug UI ----------
+$('freezeDebug').onclick=()=>{debugFrozen=!debugFrozen;$('debugCard').classList.toggle('debugFrozen',debugFrozen);$('freezeDebug').textContent=debugFrozen?'Bỏ đóng băng':'Đóng băng màn hình';if(debugFrozen){$('debugSummary').textContent=debugReport();$('debugLog').textContent=debugLines.join('\n');}else{updateMicMeters(true);updateDebugSummary(true);} };
+$('clearDebug').onclick=()=>{debugLines=[];lastError='';lastDecode=null;lastRxCapture=null;$('debugLog').textContent='Log đã xóa.';updateDebugSummary(true);};
+$('copyDebug').onclick=async()=>{const report=debugReport()+'\n\n--- EVENT LOG ---\n'+debugLines.join('\n');try{await navigator.clipboard.writeText(report);dlog('DEBUG','report copied');$('copyDebug').textContent='Đã copy';setTimeout(()=>{$('copyDebug').textContent='Copy báo cáo debug';},1200);}catch(e){setLastError('Copy debug',e);}};
+updateMicMeters(true);updateDebugSummary(true);
+
+// headless / CI hook
+window.NanaAudioTest={runSelfTest,crc32,packBytes,unpackBytes,buildTransmission,buildTransmissionAsync,transmissionPlan,decodeTransmission,PROFILES,randBytes,simulatedChannel,debugReport,captureStats};
+if(location.hash==='#selftest') setTimeout(()=>{$('selfTest').click();},100);
+})();
+</script>
+</body>
+</html>
